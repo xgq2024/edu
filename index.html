@@ -2,209 +2,33 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>3D 手势塔罗抽选系统 - 写作助手校准版</title>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.152.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.152.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/tween.js@18.6.4/dist/tween.umd.js"></script>
-
-    <style>
-        :root { --accent: #8a63ff; --panel-bg: rgba(10, 10, 20, 0.85); }
-        body { margin: 0; overflow: hidden; background: #050508; font-family: sans-serif; }
-        #ui-layer { position: absolute; top: 20px; left: 20px; z-index: 100; width: 300px; pointer-events: none; }
-        .glass { 
-            background: var(--panel-bg); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
-            padding: 15px; margin-bottom: 15px; pointer-events: auto; color: #eee;
-        }
-        h3 { margin: 0 0 10px 0; font-size: 14px; color: var(--accent); border-left: 3px solid var(--accent); padding-left: 8px; }
-        select, textarea, input { 
-            width: 100%; background: #161625; border: 1px solid #333; color: #fff; 
-            padding: 8px; border-radius: 4px; box-sizing: border-box; margin-top: 5px;
-        }
-        #video-preview { position: absolute; top: 20px; right: 20px; width: 160px; height: 120px; border-radius: 8px; transform: scaleX(-1); border: 1px solid #444; }
-        #guide { position: absolute; bottom: 20px; width: 100%; text-align: center; color: #666; font-size: 12px; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>写作助手优化版 - 手势塔罗占卜系统</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<div id="ui-layer">
-    <div class="glass">
-        <h3>系统配置</h3>
-        <select id="mode-select">
-            <option value="tarot">大阿尔卡纳 (22张)</option>
-            <option value="name">自定义名单</option>
-        </select>
-        <div id="name-config" style="display:none; margin-top:10px;">
-            <textarea id="name-input" rows="3" placeholder="每行一个名字..."></textarea>
+    <div id="app-container">
+        <div class="video-wrapper">
+            <video id="webcam" autoplay playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+        
+        <div id="ui-layer">
+            <div class="header">
+                <h1>命运之指</h1>
+                <p id="status-text">系统初始化中...</p>
+            </div>
+            
+            <div id="result-container">
+                <div id="tarot-card">
+                    <p id="instruction">请伸出食指，指向虚空</p>
+                    <p id="divination-text"></p>
+                </div>
+            </div>
         </div>
     </div>
-    <div class="glass">
-        <h3>当前结果</h3>
-        <div id="status">等待手势...</div>
-        <div id="result-display" style="font-size: 18px; font-weight: bold; margin-top:8px; color:var(--accent);"></div>
-    </div>
-</div>
 
-<video id="video-preview"></video>
-<div id="guide">张开手掌抽取 | 捏合手指移动 | 紧握拳头确认并清除</div>
-
-<script>
-// 1. 预内置 22 张大阿尔卡纳数据
-const TAROT_DECK = [
-    "愚者", "魔术师", "女祭司", "皇后", "皇帝", "教皇", "恋人", "战车", 
-    "力量", "隐士", "命运之轮", "正义", "倒吊人", "死神", "节制", 
-    "恶魔", "高塔", "星星", "月亮", "太阳", "审判", "世界"
-];
-
-let scene, camera, renderer, currentCard = null, particles = null;
-let isProcessing = false; // 动作冷却锁
-
-function init() {
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 8;
-
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
-    const point = new THREE.PointLight(0x8a63ff, 1);
-    point.position.set(5, 5, 5);
-    scene.add(ambient, point);
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-}
-
-function createCard(name) {
-    if (currentCard || isProcessing) return;
-    isProcessing = true;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 256; canvas.height = 400;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#1a1a2e'; ctx.fillRect(0,0,256,400);
-    ctx.strokeStyle = '#8a63ff'; ctx.lineWidth = 10; ctx.strokeRect(0,0,256,400);
-    ctx.fillStyle = '#fff'; ctx.font = '32px Sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(name, 128, 200);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const geometry = new THREE.BoxGeometry(2.5, 4, 0.1);
-    const material = [
-        new THREE.MeshStandardMaterial({color: 0x333333}),
-        new THREE.MeshStandardMaterial({color: 0x333333}),
-        new THREE.MeshStandardMaterial({color: 0x333333}),
-        new THREE.MeshStandardMaterial({color: 0x333333}),
-        new THREE.MeshStandardMaterial({map: texture}),
-        new THREE.MeshStandardMaterial({color: 0x111122})
-    ];
-
-    currentCard = new THREE.Mesh(geometry, material);
-    currentCard.position.y = -10;
-    scene.add(currentCard);
-
-    new TWEEN.Tween(currentCard.position).to({y: 0}, 1000).easing(TWEEN.Easing.Elastic.Out).start();
-    document.getElementById('result-display').innerText = name;
-    
-    setTimeout(() => { isProcessing = false; }, 2000); // 2秒冷却
-}
-
-function explodeCard() {
-    if (!currentCard || isProcessing) return;
-    isProcessing = true;
-
-    const count = 1000;
-    const geo = new THREE.BufferGeometry();
-    const pos = new Float32Array(count * 3);
-    const cardPos = currentCard.position.clone();
-
-    for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5) * 3 + (i%3===0?cardPos.x:i%3===1?cardPos.y:cardPos.z);
-    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    
-    particles = new THREE.Points(geo, new THREE.PointsMaterial({color: 0x8a63ff, size: 0.05, transparent: true}));
-    scene.add(particles);
-
-    scene.remove(currentCard);
-    currentCard = null;
-    document.getElementById('result-display').innerText = "";
-
-    setTimeout(() => {
-        scene.remove(particles);
-        particles = null;
-        isProcessing = false;
-    }, 1500);
-}
-
-function onResults(results) {
-    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-        document.getElementById('status').innerText = "未检测到手势";
-        return;
-    }
-    document.getElementById('status').innerText = "手势已连接";
-    const lm = results.multiHandLandmarks[0];
-
-    // 1. 抽卡逻辑 (张开手掌：指尖y坐标显著高于指根)
-    const isOpen = lm[8].y < lm[5].y && lm[12].y < lm[9].y;
-    if (isOpen && !currentCard) {
-        const mode = document.getElementById('mode-select').value;
-        let name = "";
-        if (mode === 'tarot') {
-            name = TAROT_DECK[Math.floor(Math.random() * TAROT_DECK.length)];
-        } else {
-            const list = document.getElementById('name-input').value.split('\n').filter(v => v.trim());
-            name = list.length ? list[Math.floor(Math.random() * list.length)] : "无名单";
-        }
-        createCard(name);
-    }
-
-    // 2. 移动逻辑 (食指中指捏合)
-    const distPinch = Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y);
-    if (distPinch < 0.05 && currentCard) {
-        const targetX = (lm[8].x - 0.5) * -15;
-        const targetY = (lm[8].y - 0.5) * -10;
-        currentCard.position.lerp(new THREE.Vector3(targetX, targetY, 0), 0.1);
-    }
-
-    // 3. 确认/清除逻辑 (握拳)
-    const distFist = Math.hypot(lm[8].x - lm[0].x, lm[8].y - lm[0].y);
-    if (distFist < 0.15 && currentCard) {
-        explodeCard();
-    }
-}
-
-function animate() {
-    requestAnimationFrame(animate);
-    TWEEN.update();
-    if (particles) {
-        particles.rotation.y += 0.01;
-        particles.material.opacity -= 0.01;
-    }
-    renderer.render(scene, camera);
-}
-
-// 启动
-init();
-animate();
-
-const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7 });
-hands.onResults(onResults);
-
-const cameraObj = new Camera(document.getElementById('video-preview'), {
-    onFrame: async () => { await hands.send({image: document.getElementById('video-preview')}); },
-    width: 640, height: 480
-});
-cameraObj.start();
-
-document.getElementById('mode-select').onchange = (e) => {
-    document.getElementById('name-config').style.display = e.target.value === 'name' ? 'block' : 'none';
-};
-</script>
+    <!-- 引入 MediaPipe 必要库 -->
+    <script type="module" src="script.js"></script>
 </body>
 </html>
