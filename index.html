@@ -57,7 +57,7 @@
             position: absolute;
             top: 10px;
             right: 10px;
-            width: 250px;
+            width: 150px;
         }
         
         #info-panel {
@@ -67,6 +67,55 @@
             transform: translateX(-50%);
             width: 500px;
             text-align: center;
+        }
+        
+        #card-slots {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -60%);
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            width: 80%;
+            height: 300px;
+        }
+        
+        .card-slot {
+            width: 150px;
+            height: 225px;
+            border: 2px dashed rgba(255, 255, 255, 0.5);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .card-slot.active {
+            border-color: #4CAF50;
+            background-color: rgba(76, 175, 80, 0.2);
+        }
+        
+        .card-slot.filled {
+            border-style: solid;
+            border-color: #2196F3;
+            background-color: rgba(33, 150, 243, 0.1);
+        }
+        
+        #card-deck {
+            position: absolute;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            width: 90%;
+            height: 150px;
+            overflow-x: auto;
+            padding: 10px;
         }
         
         #mode-switch {
@@ -219,23 +268,32 @@
             <div id="history-list"></div>
         </div>
         <div id="control-panel" class="ui-panel">
-            <h3>设置</h3>
+            <button id="reset-deck" class="button secondary">重置牌库</button>
+            <button id="clear-history" class="button danger">清空历史</button>
             <div class="input-group">
-                <label for="number-input">号码数量 (1-100)</label>
+                <label for="number-input">号码数量</label>
                 <input type="number" id="number-input" min="1" max="100" value="1">
             </div>
             <div class="input-group">
-                <label for="name-list">学生名单 (每行一个名字)</label>
+                <label for="name-list">学生名单</label>
                 <textarea id="name-list" placeholder="输入学生名单，每行一个名字"></textarea>
             </div>
-            <button id="reset-deck" class="button secondary">重置牌库</button>
-            <button id="clear-history" class="button danger">清空历史</button>
         </div>
         <div id="info-panel" class="ui-panel">
             <h2 id="current-card-name">准备抽卡</h2>
             <p id="current-card-meaning">请张开手掌进入抽卡状态，或使用鼠标点击卡牌</p>
         </div>
         <button id="mode-switch">切换到手势模式</button>
+        
+        <!-- 卡牌放置区域 -->
+        <div id="card-slots">
+            <div class="card-slot" data-slot="0"></div>
+            <div class="card-slot" data-slot="1"></div>
+            <div class="card-slot" data-slot="2"></div>
+        </div>
+        
+        <!-- 待抽选卡牌区域 -->
+        <div id="card-deck"></div>
     </div>
     <div id="video-container">
         <video id="video" autoplay playsinline></video>
@@ -288,6 +346,7 @@
         // 全局变量
         let scene, camera, renderer, controls;
         let cardObjects = [];
+        let slotObjects = [];
         let availableCards = [...tarotCards];
         let drawnCards = [];
         let currentMode = 'mouse'; // 'mouse' or 'gesture'
@@ -298,6 +357,7 @@
         let currentHand = null;
         let isDrawing = false;
         let selectedCard = null;
+        let selectedSlot = null;
         let cardParticles = [];
         let numberMode = false;
         let nameMode = false;
@@ -305,6 +365,8 @@
         let names = [];
         let currentNumber = 0;
         let currentNameIndex = 0;
+        let isDragging = false;
+        let dragOffset = new THREE.Vector3();
 
         // 手势状态
         const HandState = {
@@ -320,6 +382,7 @@
         async function init() {
             initThreeJS();
             initEventListeners();
+            createCardSlots();
             createCards();
             await initGestureDetection();
             animate();
@@ -391,8 +454,24 @@
                 }
             });
 
-            // 鼠标点击事件
-            renderer.domElement.addEventListener('click', onCanvasClick);
+            // 鼠标事件
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            
+            // 触摸事件
+            renderer.domElement.addEventListener('touchstart', onTouchStart);
+            renderer.domElement.addEventListener('touchmove', onTouchMove);
+            renderer.domElement.addEventListener('touchend', onTouchEnd);
+            
+            // 卡牌槽点击事件
+            const slots = document.querySelectorAll('.card-slot');
+            slots.forEach(slot => {
+                slot.addEventListener('click', function() {
+                    const slotIndex = parseInt(this.dataset.slot);
+                    selectSlot(slotIndex);
+                });
+            });
         }
 
         // 生成号码数组
@@ -410,23 +489,57 @@
             }
         }
 
-        // 创建卡牌
+        // 创建卡牌槽
+        function createCardSlots() {
+            // 清空现有槽位
+            slotObjects.forEach(slot => scene.remove(slot));
+            slotObjects = [];
+            
+            // 创建三个卡牌槽
+            const slotPositions = [-2, 0, 2];
+            const slotWidth = 1.2;
+            const slotHeight = 1.8;
+            
+            slotPositions.forEach((x, index) => {
+                const geometry = new THREE.PlaneGeometry(slotWidth, slotHeight);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0x4CAF50,
+                    transparent: true,
+                    opacity: 0.2,
+                    side: THREE.DoubleSide
+                });
+                
+                const slot = new THREE.Mesh(geometry, material);
+                slot.position.set(x, 1, -0.1);
+                slot.userData = {
+                    slotIndex: index,
+                    isFilled: false,
+                    card: null
+                };
+                
+                scene.add(slot);
+                slotObjects.push(slot);
+            });
+        }
+        
+        // 创建待抽选卡牌
         function createCards() {
             // 清空现有卡牌
             cardObjects.forEach(card => scene.remove(card));
             cardObjects = [];
 
-            // 计算卡牌位置
-            const cardWidth = 1;
-            const cardHeight = 1.5;
-            const spacing = 0.2;
+            // 计算卡牌位置（下半区域横向排列）
+            const cardWidth = 0.8;
+            const cardHeight = 1.2;
+            const spacing = 0.3;
             const totalWidth = (cardWidth + spacing) * availableCards.length - spacing;
             const startX = -totalWidth / 2 + cardWidth / 2;
+            const yPosition = -1.5;
 
             // 创建卡牌
             availableCards.forEach((card, index) => {
                 const x = startX + index * (cardWidth + spacing);
-                const cardObject = createCard(card, x, 0, 0);
+                const cardObject = createCard(card, x, yPosition, 0);
                 scene.add(cardObject);
                 cardObjects.push(cardObject);
             });
@@ -495,8 +608,8 @@
             });
         }
 
-        // 鼠标点击画布
-        function onCanvasClick(event) {
+        // 鼠标按下事件
+        function onMouseDown(event) {
             if (currentMode !== 'mouse' || isDrawing) return;
             
             // 计算鼠标位置
@@ -509,57 +622,275 @@
             raycaster.setFromCamera(mouse, camera);
             
             // 检测是否点击到卡牌
-            const intersects = raycaster.intersectObjects(cardObjects);
+            const cardIntersects = raycaster.intersectObjects(cardObjects);
+            if (cardIntersects.length > 0) {
+                selectedCard = cardIntersects[0].object;
+                isDragging = true;
+                
+                // 计算拖拽偏移
+                const intersectPoint = cardIntersects[0].point;
+                dragOffset.copy(selectedCard.position).sub(intersectPoint);
+                
+                // 提升选中卡牌的渲染顺序
+                selectedCard.material.opacity = 0.8;
+                selectedCard.renderOrder = 1;
+                
+                return;
+            }
             
-            if (intersects.length > 0) {
-                const clickedCard = intersects[0].object;
-                selectCard(clickedCard);
+            // 检测是否点击到卡牌槽
+            const slotIntersects = raycaster.intersectObjects(slotObjects);
+            if (slotIntersects.length > 0) {
+                const clickedSlot = slotIntersects[0].object;
+                selectSlot(clickedSlot.userData.slotIndex);
             }
         }
-
-        // 选择卡牌
-        function selectCard(cardObject) {
-            if (isDrawing || cardObject.userData.isSelected) return;
+        
+        // 鼠标移动事件
+        function onMouseMove(event) {
+            if (!isDragging || !selectedCard) return;
             
-            isDrawing = true;
-            selectedCard = cardObject;
-            cardObject.userData.isSelected = true;
+            // 计算鼠标位置
+            const mouse = new THREE.Vector2();
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
             
-            // 翻转卡牌
-            flipCard(cardObject);
+            // 创建射线
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
             
-            // 将卡牌移动到前面
-            gsap.to(cardObject.position, {
-                y: 1,
-                z: -1,
-                duration: 0.5,
+            // 计算射线与地面的交点
+            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+            const intersection = new THREE.Vector3();
+            raycaster.ray.intersectPlane(plane, intersection);
+            
+            // 更新卡牌位置
+            if (intersection) {
+                selectedCard.position.copy(intersection).add(dragOffset);
+                
+                // 检测是否靠近卡牌槽
+                const activeSlot = getNearestSlot(selectedCard.position);
+                highlightSlot(activeSlot);
+            }
+        }
+        
+        // 鼠标释放事件
+        function onMouseUp(event) {
+            if (!isDragging || !selectedCard) return;
+            
+            // 恢复卡牌样式
+            selectedCard.material.opacity = 1.0;
+            selectedCard.renderOrder = 0;
+            
+            // 检测是否放置在卡牌槽上
+            const targetSlot = getNearestSlot(selectedCard.position);
+            if (targetSlot !== -1 && !slotObjects[targetSlot].userData.isFilled) {
+                placeCardInSlot(selectedCard, targetSlot);
+            } else {
+                // 放回原位
+                resetCardPosition(selectedCard);
+            }
+            
+            // 重置拖拽状态
+            isDragging = false;
+            selectedCard = null;
+            clearSlotHighlights();
+        }
+        
+        // 触摸事件处理
+        function onTouchStart(event) {
+            event.preventDefault();
+            if (event.touches.length === 1) {
+                const touch = event.touches[0];
+                const mouseEvent = new MouseEvent('mousedown', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                onMouseDown(mouseEvent);
+            }
+        }
+        
+        function onTouchMove(event) {
+            event.preventDefault();
+            if (event.touches.length === 1) {
+                const touch = event.touches[0];
+                const mouseEvent = new MouseEvent('mousemove', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                onMouseMove(mouseEvent);
+            }
+        }
+        
+        function onTouchEnd(event) {
+            event.preventDefault();
+            const mouseEvent = new MouseEvent('mouseup', {});
+            onMouseUp(mouseEvent);
+        }
+        
+        // 获取最近的卡牌槽
+        function getNearestSlot(position) {
+            const slotPositions = slotObjects.map(slot => slot.position);
+            let minDistance = Infinity;
+            let nearestSlot = -1;
+            
+            slotPositions.forEach((slotPos, index) => {
+                const distance = position.distanceTo(slotPos);
+                if (distance < minDistance && distance < 1.5) {
+                    minDistance = distance;
+                    nearestSlot = index;
+                }
+            });
+            
+            return nearestSlot;
+        }
+        
+        // 高亮显示卡牌槽
+        function highlightSlot(slotIndex) {
+            clearSlotHighlights();
+            
+            if (slotIndex !== -1 && !slotObjects[slotIndex].userData.isFilled) {
+                slotObjects[slotIndex].material.color.set(0x2196F3);
+                slotObjects[slotIndex].material.opacity = 0.3;
+                
+                // 更新DOM元素样式
+                const slotElements = document.querySelectorAll('.card-slot');
+                slotElements[slotIndex].classList.add('active');
+            }
+        }
+        
+        // 清除所有卡牌槽高亮
+        function clearSlotHighlights() {
+            slotObjects.forEach(slot => {
+                if (!slot.userData.isFilled) {
+                    slot.material.color.set(0x4CAF50);
+                    slot.material.opacity = 0.2;
+                }
+            });
+            
+            // 更新DOM元素样式
+            const slotElements = document.querySelectorAll('.card-slot');
+            slotElements.forEach(slot => {
+                slot.classList.remove('active');
+            });
+        }
+        
+        // 选择卡牌槽
+        function selectSlot(slotIndex) {
+            if (slotIndex < 0 || slotIndex >= slotObjects.length) return;
+            
+            const slot = slotObjects[slotIndex];
+            
+            // 如果槽位已有卡牌，显示卡牌信息
+            if (slot.userData.isFilled && slot.userData.card) {
+                showCardInfo(slot.userData.card);
+            } else if (selectedCard) {
+                // 如果有选中的卡牌，将其放入槽位
+                placeCardInSlot(selectedCard, slotIndex);
+            }
+        }
+        
+        // 将卡牌放置在槽位中
+        function placeCardInSlot(card, slotIndex) {
+            if (slotIndex < 0 || slotIndex >= slotObjects.length) return;
+            
+            const slot = slotObjects[slotIndex];
+            
+            // 如果槽位已有卡牌，先移除
+            if (slot.userData.isFilled && slot.userData.card) {
+                const oldCard = slot.userData.card;
+                resetCardPosition(oldCard);
+                slot.userData.card = null;
+                slot.userData.isFilled = false;
+            }
+            
+            // 翻转卡牌显示正面
+            flipCard(card);
+            
+            // 移动卡牌到槽位
+            gsap.to(card.position, {
+                x: slot.position.x,
+                y: slot.position.y,
+                z: slot.position.z - 0.05,
+                duration: 0.3,
                 onComplete: () => {
+                    // 更新槽位状态
+                    slot.userData.isFilled = true;
+                    slot.userData.card = card;
+                    
+                    // 更新槽位样式
+                    slot.material.color.set(0x2196F3);
+                    slot.material.opacity = 0.1;
+                    
+                    // 更新DOM元素样式
+                    const slotElements = document.querySelectorAll('.card-slot');
+                    slotElements[slotIndex].classList.add('filled');
+                    
                     // 显示卡牌信息
-                    showCardInfo(cardObject);
+                    showCardInfo(card);
                     
                     // 添加到历史记录
-                    addToHistory(cardObject);
+                    addToHistory(card);
                     
                     // 从可用卡牌中移除
-                    const cardIndex = availableCards.findIndex(card => card.id === cardObject.userData.cardData.id);
+                    const cardIndex = availableCards.findIndex(c => c.id === card.userData.cardData.id);
                     if (cardIndex !== -1) {
                         availableCards.splice(cardIndex, 1);
                     }
                     
-                    // 从场景中移除卡牌并添加粒子效果
-                    setTimeout(() => {
-                        createCardParticles(cardObject);
-                        scene.remove(cardObject);
-                        
-                        // 重新排列剩余卡牌
-                        setTimeout(() => {
-                            createCards();
-                            isDrawing = false;
-                            selectedCard = null;
-                        }, 1000);
-                    }, 2000);
+                    // 从卡牌对象列表中移除
+                    const objectIndex = cardObjects.indexOf(card);
+                    if (objectIndex !== -1) {
+                        cardObjects.splice(objectIndex, 1);
+                    }
+                    
+                    // 重置选中状态
+                    selectedCard = null;
                 }
             });
+        }
+        
+        // 重置卡牌位置
+        function resetCardPosition(card) {
+            // 计算卡牌在牌组中的新位置
+            const cardWidth = 0.8;
+            const spacing = 0.3;
+            const totalWidth = (cardWidth + spacing) * cardObjects.length - spacing;
+            const startX = -totalWidth / 2 + cardWidth / 2;
+            
+            const cardIndex = cardObjects.indexOf(card);
+            if (cardIndex !== -1) {
+                const x = startX + cardIndex * (cardWidth + spacing);
+                
+                // 移动卡牌回原位
+                gsap.to(card.position, {
+                    x: x,
+                    y: -1.5,
+                    z: 0,
+                    duration: 0.3
+                });
+            }
+        }
+
+        // 选择卡牌（简化版，主要用于手势交互）
+        function selectCard(cardObject) {
+            if (isDrawing || cardObject.userData.isSelected) return;
+            
+            selectedCard = cardObject;
+            cardObject.userData.isSelected = true;
+            
+            // 查找空的槽位
+            const emptySlotIndex = slotObjects.findIndex(slot => !slot.userData.isFilled);
+            
+            if (emptySlotIndex !== -1) {
+                // 如果有空槽位，将卡牌放入
+                placeCardInSlot(cardObject, emptySlotIndex);
+            } else {
+                // 如果没有空槽位，显示提示
+                document.getElementById('current-card-meaning').textContent = '所有槽位已满，请先重置牌库';
+                selectedCard = null;
+                cardObject.userData.isSelected = false;
+            }
         }
 
         // 显示卡牌信息
@@ -1107,11 +1438,21 @@
             cardObjects.forEach(card => scene.remove(card));
             cardObjects = [];
             
+            // 清空槽位中的卡牌
+            slotObjects.forEach(slot => {
+                if (slot.userData.isFilled && slot.userData.card) {
+                    scene.remove(slot.userData.card);
+                    slot.userData.card = null;
+                    slot.userData.isFilled = false;
+                }
+            });
+            
             // 重置可用卡牌
             availableCards = [...tarotCards];
             
-            // 重新创建卡牌
+            // 重新创建卡牌和槽位
             createCards();
+            createCardSlots();
             
             // 重置数字和名字索引
             currentNumber = 0;
@@ -1125,9 +1466,15 @@
                 }
             }
             
+            // 重置槽位DOM元素样式
+            const slotElements = document.querySelectorAll('.card-slot');
+            slotElements.forEach(slot => {
+                slot.classList.remove('filled', 'active');
+            });
+            
             // 更新UI
             document.getElementById('current-card-name').textContent = '准备抽卡';
-            document.getElementById('current-card-meaning').textContent = '请张开手掌进入抽卡状态，或使用鼠标点击卡牌';
+            document.getElementById('current-card-meaning').textContent = '请张开手掌进入抽卡状态，或使用鼠标拖拽卡牌到上方槽位';
         }
 
         // 清空历史
