@@ -57,8 +57,7 @@
             position: absolute;
             top: 10px;
             right: 10px;
-            width: 150px;
-            padding: 10px;
+            width: 250px;
         }
         
         #info-panel {
@@ -72,59 +71,20 @@
         
         #mode-switch {
             position: absolute;
-            top: 10px;
-            right: 180px;
-            padding: 8px 16px;
+            bottom: 10px;
+            right: 10px;
+            padding: 10px 20px;
             background-color: #4CAF50;
             border: none;
             border-radius: 5px;
             color: white;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 16px;
             transition: background-color 0.3s;
         }
         
         #mode-switch:hover {
             background-color: #45a049;
-        }
-        
-        /* 卡片槽位样式 */
-        #card-slots {
-            position: absolute;
-            top: 20%;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 20px;
-            background: transparent;
-            border: none;
-            padding: 0;
-        }
-        
-        .card-slot {
-            width: 120px;
-            height: 180px;
-            border: 2px dashed #4CAF50;
-            border-radius: 8px;
-            background-color: rgba(76, 175, 80, 0.1);
-            transition: all 0.3s ease;
-        }
-        
-        .card-slot:hover {
-            background-color: rgba(76, 175, 80, 0.2);
-            border-color: #45a049;
-        }
-        
-        .card-slot.filled {
-            border-style: solid;
-            background-color: rgba(76, 175, 80, 0.3);
-        }
-        
-        /* 调整按钮样式，减少占用空间 */
-        .button {
-            padding: 6px 12px;
-            font-size: 12px;
-            margin-bottom: 6px;
         }
         
         .card-history-item {
@@ -270,11 +230,6 @@
             </div>
             <button id="reset-deck" class="button secondary">重置牌库</button>
             <button id="clear-history" class="button danger">清空历史</button>
-        </div>
-        <div id="card-slots" class="ui-panel">
-            <div class="card-slot"></div>
-            <div class="card-slot"></div>
-            <div class="card-slot"></div>
         </div>
         <div id="info-panel" class="ui-panel">
             <h2 id="current-card-name">准备抽卡</h2>
@@ -455,44 +410,25 @@
             }
         }
 
-        // 全局变量
-        let cardSlots = []; // 保存卡片槽位状态
-
         // 创建卡牌
         function createCards() {
             // 清空现有卡牌
             cardObjects.forEach(card => scene.remove(card));
             cardObjects = [];
 
-            // 初始化卡片槽位
-            cardSlots = [null, null, null];
-            updateCardSlotsUI();
-
-            // 计算卡牌位置 - 下半区域横向排列
+            // 计算卡牌位置
             const cardWidth = 1;
             const cardHeight = 1.5;
             const spacing = 0.2;
             const totalWidth = (cardWidth + spacing) * availableCards.length - spacing;
             const startX = -totalWidth / 2 + cardWidth / 2;
 
-            // 创建卡牌 - 放置在屏幕下半区域
+            // 创建卡牌
             availableCards.forEach((card, index) => {
                 const x = startX + index * (cardWidth + spacing);
-                const cardObject = createCard(card, x, -2, 0); // y = -2 放在下半区域
+                const cardObject = createCard(card, x, 0, 0);
                 scene.add(cardObject);
                 cardObjects.push(cardObject);
-            });
-        }
-
-        // 更新卡片槽位UI
-        function updateCardSlotsUI() {
-            const slots = document.querySelectorAll('.card-slot');
-            slots.forEach((slot, index) => {
-                if (cardSlots[index]) {
-                    slot.classList.add('filled');
-                } else {
-                    slot.classList.remove('filled');
-                }
             });
         }
 
@@ -522,93 +458,41 @@
             return card;
         }
 
-        // 翻转卡牌显示学生姓名
-        function flipCardForName(cardObject) {
+        // 翻转卡牌
+        function flipCard(cardObject) {
             if (cardObject.userData.isFlipped) return;
             
             cardObject.userData.isFlipped = true;
             
-            // 获取学生姓名或号码
-            let displayText = cardObject.userData.cardData.name;
-            if (nameMode && currentNameIndex < names.length) {
-                displayText = names[currentNameIndex];
-                currentNameIndex++;
-            } else if (numberMode && currentNumber < numbers.length) {
-                displayText = numbers[currentNumber].toString();
-                currentNumber++;
-            }
-            
-            // 决定正逆位
-            const isReversed = Math.random() < 0.5;
-            cardObject.userData.isReversed = isReversed;
-            
-            // 创建动态纹理显示学生姓名
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 768;
-            const ctx = canvas.getContext('2d');
-            
-            // 设置背景颜色
-            ctx.fillStyle = '#2c3e50';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            // 绘制姓名
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 48px Arial';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(displayText, canvas.width / 2, canvas.height / 2);
-            
-            // 创建纹理
-            const texture = new THREE.CanvasTexture(canvas);
-            
-            // 翻转卡牌动画
-            animateRotation(cardObject, Math.PI, 0.5, () => {
-                if (isReversed) {
-                    cardObject.rotation.z = Math.PI;
-                }
-                
-                // 更新卡牌材质为显示姓名的正面
-                cardObject.material = new THREE.MeshStandardMaterial({
-                    map: texture
+            // 加载卡牌正面纹理
+            const textureLoader = new THREE.TextureLoader();
+            const frontTexture = textureLoader.load(cardObject.userData.cardData.imageUrl, () => {
+                // 纹理加载完成后翻转卡牌
+                gsap.to(cardObject.rotation, {
+                    y: Math.PI,
+                    duration: 0.5,
+                    onComplete: () => {
+                        // 决定正逆位
+                        const isReversed = Math.random() < 0.5;
+                        cardObject.userData.isReversed = isReversed;
+                        
+                        if (isReversed) {
+                            cardObject.rotation.z = Math.PI;
+                        }
+                        
+                        // 更新卡牌材质为正面
+                        cardObject.material = new THREE.MeshStandardMaterial({
+                            map: frontTexture
+                        });
+                        
+                        // 继续翻转回正面
+                        gsap.to(cardObject.rotation, {
+                            y: 0,
+                            duration: 0.5
+                        });
+                    }
                 });
-                
-                // 继续翻转回正面
-                animateRotation(cardObject, 0, 0.5);
             });
-        }
-
-        // 原始翻转卡牌函数（保留，用于其他场景）
-        function flipCard(cardObject) {
-            flipCardForName(cardObject); // 直接调用显示姓名的翻转函数
-        }
-
-        // 简单的旋转动画函数，替代GSAP
-        function animateRotation(object, targetRotation, duration, callback) {
-            const startRotation = object.rotation.y;
-            const rotationDiff = targetRotation - startRotation;
-            const startTime = Date.now();
-            
-            function updateRotation() {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / (duration * 1000), 1);
-                const easedProgress = easeInOutCubic(progress);
-                
-                object.rotation.y = startRotation + rotationDiff * easedProgress;
-                
-                if (progress < 1) {
-                    requestAnimationFrame(updateRotation);
-                } else if (callback) {
-                    callback();
-                }
-            }
-            
-            updateRotation();
-        }
-
-        // 缓动函数
-        function easeInOutCubic(t) {
-            return t < 0.5 ? 4 * t * t * t : (t - 1) * (2 * t - 2) * (2 * t - 2) + 1;
         }
 
         // 鼠标点击画布
@@ -641,106 +525,41 @@
             selectedCard = cardObject;
             cardObject.userData.isSelected = true;
             
-            // 找到第一个空的卡片槽位
-            const emptySlotIndex = cardSlots.findIndex(slot => slot === null);
-            if (emptySlotIndex === -1) {
-                // 所有槽位已填满
-                alert('所有槽位已填满，请先重置牌库');
-                isDrawing = false;
-                selectedCard = null;
-                return;
-            }
+            // 翻转卡牌
+            flipCard(cardObject);
             
-            // 计算目标位置 - 上半区域槽位位置
-            const slotPositions = [-2, 0, 2]; // 三个槽位的x坐标
-            const targetX = slotPositions[emptySlotIndex];
-            
-            // 将卡牌移动到对应的槽位
-            animatePosition(cardObject, { x: targetX, y: 1, z: -1 }, 0.5, () => {
-                // 翻转卡牌
-                flipCardForName(cardObject);
-                
-                // 显示卡牌信息
-                showCardInfo(cardObject);
-                
-                // 添加到历史记录
-                addToHistory(cardObject);
-                
-                // 将卡牌添加到槽位
-                cardSlots[emptySlotIndex] = cardObject;
-                updateCardSlotsUI();
-                
-                // 从可用卡牌中移除
-                const cardIndex = availableCards.findIndex(card => card.id === cardObject.userData.cardData.id);
-                if (cardIndex !== -1) {
-                    availableCards.splice(cardIndex, 1);
-                }
-                
-                // 从当前卡牌列表中移除
-                const cardObjectIndex = cardObjects.indexOf(cardObject);
-                if (cardObjectIndex !== -1) {
-                    cardObjects.splice(cardObjectIndex, 1);
-                }
-                
-                // 重新排列剩余卡牌
-                setTimeout(() => {
-                    // 只重新创建剩余的卡牌
-                    if (availableCards.length > 0) {
-                        const cardWidth = 1;
-                        const spacing = 0.2;
-                        const totalWidth = (cardWidth + spacing) * availableCards.length - spacing;
-                        const startX = -totalWidth / 2 + cardWidth / 2;
-                        
-                        // 更新剩余卡牌位置
-                        availableCards.forEach((card, index) => {
-                            // 找到对应的卡牌对象
-                            const existingCard = cardObjects.find(obj => obj.userData.cardData.id === card.id);
-                            if (existingCard) {
-                                const x = startX + index * (cardWidth + spacing);
-                                animatePosition(existingCard, { x: x }, 0.3);
-                            }
-                        });
+            // 将卡牌移动到前面
+            gsap.to(cardObject.position, {
+                y: 1,
+                z: -1,
+                duration: 0.5,
+                onComplete: () => {
+                    // 显示卡牌信息
+                    showCardInfo(cardObject);
+                    
+                    // 添加到历史记录
+                    addToHistory(cardObject);
+                    
+                    // 从可用卡牌中移除
+                    const cardIndex = availableCards.findIndex(card => card.id === cardObject.userData.cardData.id);
+                    if (cardIndex !== -1) {
+                        availableCards.splice(cardIndex, 1);
                     }
                     
-                    isDrawing = false;
-                    selectedCard = null;
-                }, 1000);
+                    // 从场景中移除卡牌并添加粒子效果
+                    setTimeout(() => {
+                        createCardParticles(cardObject);
+                        scene.remove(cardObject);
+                        
+                        // 重新排列剩余卡牌
+                        setTimeout(() => {
+                            createCards();
+                            isDrawing = false;
+                            selectedCard = null;
+                        }, 1000);
+                    }, 2000);
+                }
             });
-        }
-
-        // 简单的位置动画函数，替代GSAP
-        function animatePosition(object, targetPosition, duration, callback) {
-            const startPosition = { ...object.position };
-            const positionDiff = {
-                x: targetPosition.x !== undefined ? targetPosition.x - startPosition.x : 0,
-                y: targetPosition.y !== undefined ? targetPosition.y - startPosition.y : 0,
-                z: targetPosition.z !== undefined ? targetPosition.z - startPosition.z : 0
-            };
-            const startTime = Date.now();
-            
-            function updatePosition() {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / (duration * 1000), 1);
-                const easedProgress = easeInOutCubic(progress);
-                
-                if (targetPosition.x !== undefined) {
-                    object.position.x = startPosition.x + positionDiff.x * easedProgress;
-                }
-                if (targetPosition.y !== undefined) {
-                    object.position.y = startPosition.y + positionDiff.y * easedProgress;
-                }
-                if (targetPosition.z !== undefined) {
-                    object.position.z = startPosition.z + positionDiff.z * easedProgress;
-                }
-                
-                if (progress < 1) {
-                    requestAnimationFrame(updatePosition);
-                } else if (callback) {
-                    callback();
-                }
-            }
-            
-            updatePosition();
         }
 
         // 显示卡牌信息
@@ -1327,8 +1146,11 @@
             renderer.render(scene, camera);
         }
 
-        // 页面加载完成后初始化
-        window.addEventListener('load', init);
+        // 初始化GSAP库（用于动画）
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.4/gsap.min.js';
+        script.onload = init;
+        document.head.appendChild(script);
     </script>
 </body>
 </html>
